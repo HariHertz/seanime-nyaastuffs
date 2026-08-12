@@ -5,5 +5,7 @@
     "type": "anime-torrent-provider",
     "language": "javascript",
     "entry": "provider.js",
-    "description": "Anime torrent provider for Seanime using a Nyaa search API."
+    "description": "teste teste 2"
+    "author": "Ner0",
+    "payload": "https://github.com/HariHertz/seanime-nyaastuffs/raw/refs/heads/main/provider.js"
 }
