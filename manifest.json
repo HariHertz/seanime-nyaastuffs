@@ -1,0 +1,9 @@
+{
+    "id": "nyaa-torrent-provider",
+    "name": "Nyaa Torrent Provider",
+    "version": "1.0.0",
+    "type": "anime-torrent-provider",
+    "language": "javascript",
+    "entry": "provider.js",
+    "description": "Anime torrent provider for Seanime using a Nyaa search API."
+}
