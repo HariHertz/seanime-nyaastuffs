@@ -2,7 +2,7 @@
 
 class Provider {
     constructor() {
-        this.api = "https://torrent-search-api-livid.vercel.app/api/nyaasi/"
+        this.baseUrl = "https://nyaa.si"
     }
 
     getSettings() {
@@ -20,8 +20,10 @@ class Provider {
 
         return this.searchTorrents(query)
     }
+
+
   
-   async smartSearch(opts) {
+    async smartSearch(opts) {
         let query = this.cleanQuery(opts && opts.query)
 
         if (!query) {
@@ -40,7 +42,27 @@ class Provider {
             query += " " + String(opts.resolution).replace(/p$/i, "")
         }
 
-        return this.searchTorrents(query)
+        let torrents = await this.searchTorrents(query)
+
+        if (opts && opts.batch) {
+            torrents = torrents.filter(torrent => torrent && torrent.isBatch)
+        } else if (opts && opts.episodeNumber > 0) {
+            torrents = torrents.filter(torrent => torrent && torrent.episodeNumber === opts.episodeNumber)
+        }
+
+        if (opts && opts.resolution) {
+            const wantedResolution = String(opts.resolution).toLowerCase().replace(/p?$/i, "p")
+            const resolutionMatches = torrents.filter(torrent => {
+                const resolution = String((torrent && torrent.resolution) || "").toLowerCase()
+                return !resolution || resolution === wantedResolution
+            })
+
+            if (resolutionMatches.length > 0) {
+                torrents = resolutionMatches
+            }
+        }
+
+        return torrents
     }
 
     async getTorrentInfoHash(torrent) {
@@ -55,52 +77,91 @@ class Provider {
         return []
     }
 
-async searchTorrents(query) {
-    return [{
-        name: "SEARCH TORRENTS FUNCIONOU | QUERY = " + query,
-        date: new Date().toISOString(),
-        size: 1000000,
-        formattedSize: "1 MB",
-        seeders: 10,
-        leechers: 1,
-        downloadCount: 0,
-        link: "https://example.com/",
-        downloadUrl: "",
-        magnetLink: "",
-        infoHash: "",
-        resolution: "1080p",
-        isBatch: false,
-        episodeNumber: -1,
-        releaseGroup: "TEST",
-        isBestRelease: false,
-        confirmed: true,
-    }]
-}
-    /*async searchTorrents(query) {
+    async searchTorrents(query) {
         const cleaned = this.cleanQuery(query)
         if (!cleaned) return []
 
-        if (cleaned.toLowerCase() === "html probe") {
-            return this.runHtmlProbe()
-        }
+        const isProbe = cleaned.toLowerCase() === "nyaa probe"
+        const searchQuery = isProbe ? "One Piece" : cleaned
+        const url = this.baseUrl + "/?f=0&c=0_0&q=" + encodeURIComponent(searchQuery) + "&s=seeders&o=desc"
 
         try {
-            const response = await fetch(this.api + encodeURIComponent(cleaned))
-
+            const response = await fetch(url)
             if (!response.ok) return []
 
-            const data = await response.json()
+            const html = response.text()
+            const $ = LoadDoc(html)
+            const rows = $("tbody tr")
 
-            if (!Array.isArray(data)) return []
+            if (isProbe) {
+                const firstRow = rows.first()
+                const titleLink = firstRow.find('td[colspan="2"] a').first()
+                const magnetLink = firstRow.find('a[href^="magnet:"]').first()
+                const cells = firstRow.children("td")
 
-            return data
-                .map(item => this.toAnimeTorrent(item))
-                .filter(torrent => torrent.name)
+                const title = titleLink.text().trim()
+                const pagePath = titleLink.attr("href") || ""
+                const magnet = (magnetLink.attr("href") || "").replace(/&amp;/g, "&")
+                const size = cells.eq(3).text().trim()
+                const date = cells.eq(4).text().trim()
+                const seeders = cells.eq(5).text().trim()
+                const leechers = cells.eq(6).text().trim()
+
+                return [{
+                    name: "NYAA PROBE | rows=" + rows.length() + " | title=" + title + " | page=" + pagePath + " | magnet=" + (magnet ? "yes" : "no") + " | size=" + size + " | date=" + date + " | seeders=" + seeders + " | leechers=" + leechers,
+                    date: new Date(0).toISOString(),
+                    size: this.parseSize(size),
+                    formattedSize: size,
+                    seeders: this.toNumber(seeders),
+                    leechers: this.toNumber(leechers),
+                    downloadCount: 0,
+                    link: pagePath ? this.baseUrl + pagePath.replace(/#comments$/i, "") : url,
+                    downloadUrl: "",
+                    magnetLink: magnet,
+                    infoHash: this.parseInfoHash(magnet),
+                    resolution: "1080p",
+                    isBatch: false,
+                    episodeNumber: 1,
+                    releaseGroup: "NYAA-PROBE",
+                    isBestRelease: false,
+                    confirmed: true,
+                }]
+            }
+
+            return rows.map((index, row) => {
+                const titleLink = row.find('td[colspan="2"] a').first()
+                const magnetLink = row.find('a[href^="magnet:"]').first()
+                const cells = row.children("td")
+
+                const name = titleLink.text().trim()
+                const pagePath = titleLink.attr("href") || ""
+                const magnet = (magnetLink.attr("href") || "").replace(/&amp;/g, "&")
+                const formattedSize = cells.eq(3).text().trim()
+
+                return {
+                    name: name,
+                    date: this.toRFC3339(cells.eq(4).text().trim()),
+                    size: this.parseSize(formattedSize),
+                    formattedSize: formattedSize,
+                    seeders: this.toNumber(cells.eq(5).text().trim()),
+                    leechers: this.toNumber(cells.eq(6).text().trim()),
+                    downloadCount: this.toNumber(cells.eq(7).text().trim()),
+                    link: pagePath ? this.baseUrl + pagePath.replace(/#comments$/i, "") : magnet,
+                    downloadUrl: "",
+                    magnetLink: magnet,
+                    infoHash: this.parseInfoHash(magnet),
+                    resolution: this.parseResolution(name),
+                    isBatch: this.isBatch(name),
+                    episodeNumber: this.parseEpisode(name),
+                    releaseGroup: this.parseReleaseGroup(name),
+                    isBestRelease: false,
+                    confirmed: false,
+                }
+            }).filter(torrent => torrent.name && (torrent.magnetLink || torrent.link))
         } catch (_) {
             return []
         }
-    } */
-
+    }
     async runHtmlProbe() {
         const url = "https://example.com/"
 
@@ -280,6 +341,20 @@ async searchTorrents(query) {
     parseEpisode(name) {
         const text = String(name || "")
 
+        if (/(?:^|[\s[\]()._-])\d{1,4}\s*-\s*\d{1,4}(?:$|[\s[\]()._-])/i.test(text)) {
+            return -1
+        }
+
+        if (/(?:^|[\s[\]()._-])S\d{1,2}\s*-\s*S\d{1,2}(?:$|[\s[\]()._-])/i.test(text)) {
+            return -1
+        }
+
+        const seasonEpisode = text.match(
+            /(?:^|[\s[\]()._-])S\d{1,2}[\s._-]?E(\d{1,4})(?:$|[\s[\]()._-])/i
+        )
+
+        if (seasonEpisode) return Number(seasonEpisode[1])
+
         const explicit = text.match(
             /(?:^|[\s[\]()._-])(?:E|EP|Episode)[\s._-]?(\d{1,4})(?:$|[\s[\]()._-])/i
         )
@@ -287,16 +362,38 @@ async searchTorrents(query) {
         if (explicit) return Number(explicit[1])
 
         const bracketed = text.match(
-            /\[(\d{1,3})]/
+            /\[(\d{1,4})]/
         )
 
         if (bracketed) return Number(bracketed[1])
 
         const dashed = text.match(
-            /\s-\s(\d{1,3})(?:\s|$|[\[\]()._-])/
+            /\s-\s(\d{1,4})(?:\s|$|[\[\]()._-])/
         )
 
         if (dashed) return Number(dashed[1])
+
+        const candidates = []
+        const standalonePattern = /(?:^|[\s[\]()._-])(\d{1,4})(?:$|[\s[\]()._-])/g
+        let match
+
+        while ((match = standalonePattern.exec(text)) !== null) {
+            candidates.push(Number(match[1]))
+
+            if (match[0].length === 0) {
+                standalonePattern.lastIndex += 1
+            }
+        }
+
+        for (let i = candidates.length - 1; i >= 0; i--) {
+            const episode = candidates[i]
+
+            if (episode === 480 || episode === 540 || episode === 576 || episode === 720 || episode === 1080 || episode === 1440 || episode === 2160) {
+                continue
+            }
+
+            return episode
+        }
 
         return -1
     }
@@ -310,8 +407,13 @@ async searchTorrents(query) {
     }
 
     isBatch(name) {
-        return /\b(?:batch|complete|season|s\d{1,2}|全集)\b/i
-            .test(String(name || ""))
+        const text = String(name || "")
+
+        if (/(?:^|[\s[\]()._-])(?:batch|complete|season)(?:$|[\s[\]()._-])/i.test(text)) {
+            return true
+        }
+
+        return /(?:^|[\s[\]()._-])s\d{1,2}(?![\s._-]*e\d)(?:$|[\s[\]()._-])/i.test(text)
     }
 
     toNumber(value) {
