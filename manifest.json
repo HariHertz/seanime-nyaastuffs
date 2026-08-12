@@ -4,8 +4,7 @@
     "version": "1.0.0",
     "type": "anime-torrent-provider",
     "language": "javascript",
-    "entry": "provider.js",
-    "description": "teste teste 2"
+    "description": "teste teste 2",
     "author": "Ner0",
-    "payload": "https://github.com/HariHertz/seanime-nyaastuffs/raw/refs/heads/main/provider.js"
+    "payloadURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/provider.js"
 }
