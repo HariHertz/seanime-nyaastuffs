@@ -1,9 +1,12 @@
 {
-    "id": "nyaa-torrent-provider",
-    "name": "Nyaa Torrent Provider",
-    "version": "1.0.0",
-    "type": "anime-torrent-provider",
-    "language": "javascript",
-    "entry": "provider.js",
-    "description": "Anime torrent provider for Seanime using a Nyaa search API."
+  "id": "nyaa-torrent-provider",
+  "name": "Nyaa Torrent Provider",
+  "description": "Nyaa torrent provider for Seanime",
+  "manifestURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/manifest.json",
+  "version": "1.0.0",
+  "author": "Ner0",
+  "type": "anime-torrent-provider",
+  "language": "javascript",
+  "lang": "en",
+  "payloadURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/provider.js"
 }
