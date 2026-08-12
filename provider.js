@@ -128,10 +128,10 @@ class Provider {
             downloadUrl: "",
             magnetLink: "",
             infoHash: "",
-            resolution: "",
+            resolution: "1080p",
             isBatch: false,
-            episodeNumber: -1,
-            releaseGroup: "",
+            episodeNumber: 1,
+            releaseGroup: "HTML-PROBE",
             isBestRelease: false,
             confirmed: true,
         }]
