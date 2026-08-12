@@ -59,6 +59,10 @@ class Provider {
         const cleaned = this.cleanQuery(query)
         if (!cleaned) return []
 
+        if (cleaned.toLowerCase() === "html probe") {
+            return this.runHtmlProbe()
+        }
+
         try {
             const response = await fetch(this.api + encodeURIComponent(cleaned))
             if (!response.ok) return []
@@ -70,6 +74,67 @@ class Provider {
         } catch (_) {
             return []
         }
+    }
+
+    async runHtmlProbe() {
+        const url = "https://example.com/"
+        const response = await fetch(url, {
+            headers: {
+                "User-Agent": "Seanime Nyaa Torrent Provider HTML Probe",
+            },
+            timeout: 20,
+        })
+
+        if (!response.ok) {
+            return [{
+                name: "HTML probe failed: HTTP " + response.status,
+                date: new Date(0).toISOString(),
+                size: 0,
+                formattedSize: "",
+                seeders: 0,
+                leechers: 0,
+                downloadCount: 0,
+                link: url,
+                downloadUrl: "",
+                magnetLink: "",
+                infoHash: "",
+                resolution: "",
+                isBatch: false,
+                episodeNumber: -1,
+                releaseGroup: "",
+                isBestRelease: false,
+                confirmed: false,
+            }]
+        }
+
+        const html = response.text()
+        const $ = LoadDoc(html)
+
+        const heading = $("h1").first().text().trim()
+        const firstLink = $("a").first()
+        const firstLinkText = firstLink.text().trim()
+        const firstLinkHref = firstLink.attr("href") || ""
+        const paragraphCount = $("p").length()
+
+        return [{
+            name: "HTML probe OK | h1=" + heading + " | a=" + firstLinkText + " | href=" + firstLinkHref + " | p=" + paragraphCount,
+            date: new Date(0).toISOString(),
+            size: html.length,
+            formattedSize: String(html.length) + " chars",
+            seeders: response.status,
+            leechers: paragraphCount,
+            downloadCount: 0,
+            link: url,
+            downloadUrl: "",
+            magnetLink: "",
+            infoHash: "",
+            resolution: "",
+            isBatch: false,
+            episodeNumber: -1,
+            releaseGroup: "",
+            isBestRelease: false,
+            confirmed: true,
+        }]
     }
 
     toAnimeTorrent(item) {
