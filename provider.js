@@ -14,31 +14,26 @@ class Provider {
         }
     }
 
-async search(opts) {
-    return [{
-        name: "TESTE DO PROVIDER",
-        date: new Date().toISOString(),
-        size: 1000000,
-        formattedSize: "1 MB",
-        seeders: 10,
-        leechers: 1,
-        downloadCount: 1,
-        link: "https://example.com/",
-        downloadUrl: "",
-        magnetLink: "",
-        infoHash: "",
-        resolution: "1080p",
-        isBatch: false,
-        episodeNumber: 1,
-        releaseGroup: "TEST",
-        isBestRelease: false,
-        confirmed: true,
+    async search(opts) {
+        return [{
+            name: "TESTE DO PROVIDER",
+            date: new Date().toISOString(),
+            size: 1000000,
+            formattedSize: "1 MB",
+            seeders: 10,
+            leechers: 1,
+            downloadCount: 1,
+            link: "https://example.com/",
+            downloadUrl: "",
+            magnetLink: "",
+            infoHash: "",
+            resolution: "1080p",
+            isBatch: false,
+            episodeNumber: 1,
+            releaseGroup: "TEST",
+            isBestRelease: false,
+            confirmed: true,
     }]
-}
-        const query = this.cleanQuery(opts && opts.query)
-        if (!query) return []
-
-        return this.searchTorrents(query)
     }
 
     async smartSearch(opts) {
