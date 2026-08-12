@@ -1,10 +1,12 @@
 {
   "id": "nyaa-torrent-provider",
   "name": "Nyaa Torrent Provider",
+  "description": "Nyaa torrent provider for Seanime",
+  "manifestURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/manifest.json",
   "version": "1.0.0",
+  "author": "Ner0",
   "type": "anime-torrent-provider",
   "language": "javascript",
-  "description": "teste teste 2",
-  "author": "Ner0",
+  "lang": "en",
   "payloadURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/provider.js"
 }
