@@ -1,10 +1,10 @@
 {
-    "id": "nyaa-torrent-provider",
-    "name": "Nyaa Torrent Provider",
-    "version": "1.0.0",
-    "type": "anime-torrent-provider",
-    "language": "javascript",
-    "description": "teste teste 2",
-    "author": "Ner0",
-    "payloadURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/provider.js"
+  "id": "nyaa-torrent-provider",
+  "name": "Nyaa Torrent Provider",
+  "version": "1.0.0",
+  "type": "anime-torrent-provider",
+  "language": "javascript",
+  "description": "teste teste 2",
+  "author": "Ner0",
+  "payloadURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/provider.js"
 }
