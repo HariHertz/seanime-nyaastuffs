@@ -15,28 +15,13 @@ class Provider {
     }
 
     async search(opts) {
-        return [{
-            name: "TESTE DO PROVIDER",
-            date: new Date().toISOString(),
-            size: 1000000,
-            formattedSize: "1 MB",
-            seeders: 10,
-            leechers: 1,
-            downloadCount: 1,
-            link: "https://example.com/",
-            downloadUrl: "",
-            magnetLink: "",
-            infoHash: "",
-            resolution: "1080p",
-            isBatch: false,
-            episodeNumber: 1,
-            releaseGroup: "TEST",
-            isBestRelease: false,
-            confirmed: true,
-    }]
-    }
+        const query = this.cleanQuery(opts && opts.query)
+        if (!query) return []
 
-    async smartSearch(opts) {
+        return this.searchTorrents(query)
+    }
+  
+   async smartSearch(opts) {
         let query = this.cleanQuery(opts && opts.query)
 
         if (!query) {
@@ -70,7 +55,28 @@ class Provider {
         return []
     }
 
-    async searchTorrents(query) {
+async searchTorrents(query) {
+    return [{
+        name: "SEARCH TORRENTS FUNCIONOU | QUERY = " + query,
+        date: new Date().toISOString(),
+        size: 1000000,
+        formattedSize: "1 MB",
+        seeders: 10,
+        leechers: 1,
+        downloadCount: 0,
+        link: "https://example.com/",
+        downloadUrl: "",
+        magnetLink: "",
+        infoHash: "",
+        resolution: "1080p",
+        isBatch: false,
+        episodeNumber: -1,
+        releaseGroup: "TEST",
+        isBestRelease: false,
+        confirmed: true,
+    }]
+}
+    /*async searchTorrents(query) {
         const cleaned = this.cleanQuery(query)
         if (!cleaned) return []
 
@@ -80,19 +86,24 @@ class Provider {
 
         try {
             const response = await fetch(this.api + encodeURIComponent(cleaned))
+
             if (!response.ok) return []
 
             const data = await response.json()
+
             if (!Array.isArray(data)) return []
 
-            return data.map(item => this.toAnimeTorrent(item)).filter(torrent => torrent.name)
+            return data
+                .map(item => this.toAnimeTorrent(item))
+                .filter(torrent => torrent.name)
         } catch (_) {
             return []
         }
-    }
+    } */
 
     async runHtmlProbe() {
         const url = "https://example.com/"
+
         const response = await fetch(url, {
             headers: {
                 "User-Agent": "Seanime Nyaa Torrent Provider HTML Probe",
@@ -126,27 +137,42 @@ class Provider {
         const $ = LoadDoc(html)
 
         const heading = $("h1").first().text().trim()
+
         const firstLink = $("a").first()
         const firstLinkText = firstLink.text().trim()
         const firstLinkHref = firstLink.attr("href") || ""
+
         const paragraphCount = $("p").length()
 
         return [{
-            name: "HTML probe OK | h1=" + heading + " | a=" + firstLinkText + " | href=" + firstLinkHref + " | p=" + paragraphCount,
+            name:
+                "HTML probe OK | h1=" +
+                heading +
+                " | a=" +
+                firstLinkText +
+                " | href=" +
+                firstLinkHref +
+                " | p=" +
+                paragraphCount,
+
             date: new Date(0).toISOString(),
             size: html.length,
             formattedSize: String(html.length) + " chars",
+
             seeders: response.status,
             leechers: paragraphCount,
             downloadCount: 0,
+
             link: url,
             downloadUrl: "",
             magnetLink: "",
             infoHash: "",
+
             resolution: "1080p",
             isBatch: false,
             episodeNumber: 1,
             releaseGroup: "HTML-PROBE",
+
             isBestRelease: false,
             confirmed: true,
         }]
@@ -159,8 +185,11 @@ class Provider {
         return {
             name: name,
             date: this.toRFC3339(item && item.DateUploaded),
+
             size: this.parseSize(item && item.Size),
-            formattedSize: item && item.Size ? String(item.Size) : "",
+            formattedSize: item && item.Size
+                ? String(item.Size)
+                : "",
 
             seeders: this.toNumber(item && item.Seeders),
             leechers: this.toNumber(item && item.Leechers),
@@ -187,7 +216,9 @@ class Provider {
         return this.cleanQuery(
             media.englishTitle ||
             media.romajiTitle ||
-            (Array.isArray(media.synonyms) && media.synonyms[0]) ||
+            (Array.isArray(media.synonyms)
+                ? media.synonyms[0]
+                : "") ||
             ""
         )
     }
@@ -200,14 +231,19 @@ class Provider {
     }
 
     parseInfoHash(magnet) {
-        const match = String(magnet || "").match(/btih:([A-Fa-f0-9]{32,40})/i)
+        const match = String(magnet || "")
+            .match(/btih:([A-Fa-f0-9]{32,40})/i)
+
         return match ? match[1] : ""
     }
 
     parseSize(value) {
         if (!value) return 0
 
-        const match = String(value).trim().match(/^([\d.]+)\s*([KMGT]?i?B|[KMGT]B)?$/i)
+        const match = String(value)
+            .trim()
+            .match(/^([\d.]+)\s*([KMGT]?i?B|[KMGT]B)?$/i)
+
         if (!match) return 0
 
         const amount = Number(match[1])
@@ -221,47 +257,69 @@ class Provider {
             MB: 1000 ** 2,
             GB: 1000 ** 3,
             TB: 1000 ** 4,
+
             KIB: 1024,
             MIB: 1024 ** 2,
             GIB: 1024 ** 3,
             TIB: 1024 ** 4,
         }
 
-        return Math.round(amount * (multipliers[unit] || 1))
+        return Math.round(
+            amount * (multipliers[unit] || 1)
+        )
     }
 
     parseResolution(name) {
-        const match = String(name || "").match(/(?:^|[\s[\]()._-])(2160|1440|1080|720|576|540|480)p?(?:$|[\s[\]()._-])/i)
+        const match = String(name || "").match(
+            /(?:^|[\s[\]()._-])(2160|1440|1080|720|576|540|480)p?(?:$|[\s[\]()._-])/i
+        )
+
         return match ? match[1] + "p" : ""
     }
 
     parseEpisode(name) {
         const text = String(name || "")
 
-        const explicit = text.match(/(?:^|[\s[\]()._-])(?:E|EP|Episode)[\s._-]?(\d{1,4})(?:$|[\s[\]()._-])/i)
+        const explicit = text.match(
+            /(?:^|[\s[\]()._-])(?:E|EP|Episode)[\s._-]?(\d{1,4})(?:$|[\s[\]()._-])/i
+        )
+
         if (explicit) return Number(explicit[1])
 
-        const bracketed = text.match(/\[(\d{1,3})]/)
+        const bracketed = text.match(
+            /\[(\d{1,3})]/
+        )
+
         if (bracketed) return Number(bracketed[1])
 
-        const dashed = text.match(/\s-\s(\d{1,3})(?:\s|$|[\[\]()._-])/)
+        const dashed = text.match(
+            /\s-\s(\d{1,3})(?:\s|$|[\[\]()._-])/
+        )
+
         if (dashed) return Number(dashed[1])
 
         return -1
     }
 
     parseReleaseGroup(name) {
-        const match = String(name || "").match(/^\[([^\]]+)]/)
+        const match = String(name || "").match(
+            /^\[([^\]]+)]/
+        )
+
         return match ? match[1] : ""
     }
 
     isBatch(name) {
-        return /\b(?:batch|complete|season|s\d{1,2}|全集)\b/i.test(String(name || ""))
+        return /\b(?:batch|complete|season|s\d{1,2}|全集)\b/i
+            .test(String(name || ""))
     }
 
     toNumber(value) {
         const number = Number(value || 0)
-        return Number.isFinite(number) ? number : 0
+
+        return Number.isFinite(number)
+            ? number
+            : 0
     }
 
     toRFC3339(value) {
