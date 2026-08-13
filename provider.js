@@ -2,6 +2,47 @@
 
 const NEKOBT_API_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJ1c3IiOiIxMzAyMjgwOTAyMjk5OSIsInZlciI6MiwidHlwIjoxLCJpYXQiOjE3ODY2MTQ3NjcsImV4cCI6MTgxODE1MDc2N30.bsc6muXf09xdrPKsIROmafUNFEFKlf06S8UZC547_Dw"
 
+const RELEASE_PREFERENCES = {
+    preferPtBrSubtitles: true,
+    avoidMachineTranslatedSubtitles: true,
+    preferSoftsubs: true,
+    preferredVideoCodecs: [],
+    preferredVideoTypes: [],
+    preferRequestedResolution: true,
+    preferMoreSeeders: true,
+}
+
+const VIDEO_CODEC_NAMES = {
+    0: "OTHER",
+    1: "H264",
+    2: "H265",
+    3: "AV1",
+    4: "VP9",
+    5: "MPEG-2",
+    6: "MPEG-4",
+    7: "WMV",
+    8: "VC1",
+}
+
+const VIDEO_TYPE_NAMES = {
+    0: "OTHER",
+    1: "VHS",
+    2: "LASERDISC",
+    3: "TV - ENCODE",
+    4: "TV - RAW",
+    5: "DVD - REMUX",
+    6: "DVD - ENCODE",
+    7: "WEB - MINI",
+    8: "WEB - ENCODE",
+    9: "WEB-DL",
+    11: "BD - DISC",
+    12: "BD - MINI",
+    13: "BD - ENCODE",
+    14: "BD - REMUX",
+    15: "HYBRID",
+    16: "DVD - DISC",
+}
+
 class Provider {
     constructor() {
         this.baseUrl = "https://nekobt.to"
@@ -22,14 +63,20 @@ class Provider {
         const query = this.cleanQuery(opts && opts.query) || this.getBestTitle(opts && opts.media)
         if (!query) return []
 
-        return this.searchTorrents({
+        const context = {
+            confirmed: false,
+            requestedEpisode: -1,
+            requestedAbsoluteEpisode: -1,
+            requestedResolution: "",
+            episodesById: {},
+        }
+        const torrents = await this.searchTorrents({
             query: query,
             limit: 100,
             sort_by: "best",
-        }, {
-            confirmed: false,
-            episodesById: {},
-        })
+        }, context)
+
+        return this.finalizeTorrents(this.sortTorrents(torrents, context))
     }
 
     async smartSearch(opts) {
@@ -131,16 +178,7 @@ class Provider {
             }
         }
 
-        if (requestedResolution) {
-            const matching = torrents.filter(torrent => torrent && torrent.resolution === requestedResolution)
-            const unknown = torrents.filter(torrent => torrent && !torrent.resolution)
-
-            if (matching.length > 0) {
-                torrents = matching.concat(unknown)
-            }
-        }
-
-        return this.sortTorrents(torrents, context)
+        return this.finalizeTorrents(this.sortTorrents(torrents, context))
     }
 
     async getTorrentInfoHash(torrent) {
@@ -334,6 +372,14 @@ class Provider {
             releaseGroup: this.getReleaseGroup(item, name),
             isBestRelease: false,
             confirmed: Boolean(context.confirmed && mediaMatches && episodeMatches),
+            _neko: {
+                subLang: item.sub_lang,
+                fanSubLang: item.fsub_lang,
+                mtl: this.toOptionalBoolean(item.mtl),
+                hardsub: this.toOptionalBoolean(item.hardsub),
+                videoCodec: this.normalizeVideoCodec(item.video_codec),
+                videoType: this.normalizeVideoType(item.video_type),
+            },
         }
     }
 
@@ -476,27 +522,188 @@ class Provider {
     }
 
     sortTorrents(torrents, context) {
-        const requestedResolution = context.requestedResolution || ""
-        const requestedEpisode = context.requestedEpisode || -1
-        const requestedAbsolute = context.requestedAbsoluteEpisode || -1
-
         return torrents.sort((a, b) => {
-            const confirmedDifference = Number(Boolean(b.confirmed)) - Number(Boolean(a.confirmed))
-            if (confirmedDifference) return confirmedDifference
+            const scoreDifference = this.getReleaseScore(b, context) - this.getReleaseScore(a, context)
+            if (scoreDifference) return scoreDifference
 
-            const aEpisodeMatch = a.episodeNumber === requestedEpisode || a.episodeNumber === requestedAbsolute
-            const bEpisodeMatch = b.episodeNumber === requestedEpisode || b.episodeNumber === requestedAbsolute
-            const episodeDifference = Number(bEpisodeMatch) - Number(aEpisodeMatch)
-            if (episodeDifference) return episodeDifference
-
-            const resolutionDifference = Number(b.resolution === requestedResolution) - Number(a.resolution === requestedResolution)
-            if (resolutionDifference) return resolutionDifference
-
-            const seederDifference = b.seeders - a.seeders
-            if (seederDifference) return seederDifference
+            if (RELEASE_PREFERENCES.preferMoreSeeders) {
+                const seederDifference = b.seeders - a.seeders
+                if (seederDifference) return seederDifference
+            }
 
             return new Date(b.date).getTime() - new Date(a.date).getTime()
         })
+    }
+
+    getReleaseScore(torrent, context) {
+        const metadata = torrent && torrent._neko ? torrent._neko : {}
+        const requestedEpisode = context.requestedEpisode || -1
+        const requestedAbsolute = context.requestedAbsoluteEpisode || -1
+        const requestedResolution = context.requestedResolution || ""
+        let score = 0
+
+        if (torrent.confirmed) score += 100000
+
+        if (requestedEpisode > 0 && (
+            torrent.episodeNumber === requestedEpisode ||
+            torrent.episodeNumber === requestedAbsolute
+        )) {
+            score += 50000
+        }
+
+        if (
+            RELEASE_PREFERENCES.preferRequestedResolution &&
+            requestedResolution &&
+            torrent.resolution === requestedResolution
+        ) {
+            score += 10000
+        }
+
+        if (
+            RELEASE_PREFERENCES.preferPtBrSubtitles &&
+            this.hasPreferredSubtitleLanguage(metadata)
+        ) {
+            score += 5000
+        }
+
+        if (RELEASE_PREFERENCES.avoidMachineTranslatedSubtitles && metadata.mtl === true) {
+            score -= 1200
+        }
+
+        if (RELEASE_PREFERENCES.preferSoftsubs) {
+            if (metadata.hardsub === false) score += 500
+            if (metadata.hardsub === true) score -= 500
+        }
+
+        score += this.getOrderedPreferenceScore(
+            metadata.videoType,
+            RELEASE_PREFERENCES.preferredVideoTypes,
+            300,
+            value => this.normalizeVideoType(value)
+        )
+        score += this.getOrderedPreferenceScore(
+            metadata.videoCodec,
+            RELEASE_PREFERENCES.preferredVideoCodecs,
+            200,
+            value => this.normalizeVideoCodec(value)
+        )
+
+        return score
+    }
+
+    getOrderedPreferenceScore(value, preferences, step, normalize) {
+        if (!value || !Array.isArray(preferences) || preferences.length === 0) return 0
+
+        const normalizedValue = normalize(value)
+
+        for (let i = 0; i < preferences.length; i++) {
+            if (normalizedValue === normalize(preferences[i])) {
+                return (preferences.length - i) * step
+            }
+        }
+
+        return 0
+    }
+
+    hasPreferredSubtitleLanguage(metadata) {
+        const languages = this.parseLanguageList(metadata && metadata.subLang).concat(
+            this.parseLanguageList(metadata && metadata.fanSubLang)
+        )
+
+        for (let i = 0; i < languages.length; i++) {
+            const code = String(languages[i] || "")
+                .toLowerCase()
+                .replace(/[^a-z]/g, "")
+
+            if (code === "ptbr" || code === "portuguesebr" || code === "portuguesebrazil") {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    parseLanguageList(value) {
+        const values = Array.isArray(value) ? value : String(value || "").split(",")
+        return values.map(language => String(language || "").trim()).filter(Boolean)
+    }
+
+    normalizeVideoCodec(value) {
+        const id = Number(value)
+        if (Number.isInteger(id) && VIDEO_CODEC_NAMES[id] !== undefined) {
+            return VIDEO_CODEC_NAMES[id]
+        }
+
+        const normalized = String(value || "")
+            .toUpperCase()
+            .replace(/[\s._-]+/g, "")
+
+        const aliases = {
+            AVC: "H264",
+            X264: "H264",
+            H264: "H264",
+            HEVC: "H265",
+            X265: "H265",
+            H265: "H265",
+            AV1: "AV1",
+            VP9: "VP9",
+            MPEG2: "MPEG-2",
+            MPEG4: "MPEG-4",
+            WMV: "WMV",
+            VC1: "VC1",
+            OTHER: "OTHER",
+        }
+
+        return aliases[normalized] || ""
+    }
+
+    normalizeVideoType(value) {
+        const id = Number(value)
+        if (Number.isInteger(id) && VIDEO_TYPE_NAMES[id] !== undefined) {
+            return VIDEO_TYPE_NAMES[id]
+        }
+
+        const normalized = String(value || "")
+            .toUpperCase()
+            .replace(/[\s._-]+/g, "")
+
+        const aliases = {
+            HYBRID: "HYBRID",
+            BDREMUX: "BD - REMUX",
+            BLURAYREMUX: "BD - REMUX",
+            BDENCODE: "BD - ENCODE",
+            BLURAY: "BD - ENCODE",
+            BLURAYENCODE: "BD - ENCODE",
+            BDMINI: "BD - MINI",
+            BDDISC: "BD - DISC",
+            WEBDL: "WEB-DL",
+            WEBRIP: "WEB - ENCODE",
+            WEBENCODE: "WEB - ENCODE",
+            WEBMINI: "WEB - MINI",
+            DVDENCODE: "DVD - ENCODE",
+            DVDREMUX: "DVD - REMUX",
+            DVDDISC: "DVD - DISC",
+            TVRAW: "TV - RAW",
+            TVENCODE: "TV - ENCODE",
+            LASERDISC: "LASERDISC",
+            VHS: "VHS",
+            OTHER: "OTHER",
+        }
+
+        return aliases[normalized] || ""
+    }
+
+    toOptionalBoolean(value) {
+        if (value === true || value === false) return value
+        return undefined
+    }
+
+    finalizeTorrents(torrents) {
+        for (let i = 0; i < torrents.length; i++) {
+            delete torrents[i]._neko
+        }
+
+        return torrents
     }
 
     normalizeResolution(value) {
