@@ -1,10 +1,10 @@
 {
-  "id": "nekobt-torrent-multiprovider",
-  "name": "NekoBT Provider Ultra 3000",
-  "description": "NekoBT torrent provider for Seanime!",
+  "id": "nekobridge",
+  "name": "NekoBridge",
+  "description": "A bridge between NekoBT and Seanime!",
   "manifestURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/manifest.json",
-  "version": "1.0.3",
-  "author": "Ner0",
+  "version": "1.0.5",
+  "author": "Haris Hertz",
   "type": "anime-torrent-provider",
   "language": "javascript",
   "lang": "en",
@@ -15,7 +15,7 @@
       {
         "type": "text",
         "name": "nekobtApiKey",
-        "label": "NekoBT API Key (SSID used for API authentication)",
+        "label": "NekoBT API Key",
         "default": ""
       },
       {
