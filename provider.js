@@ -1,8 +1,12 @@
 /// <reference path="./anime-torrent-provider.d.ts" />
 
+const NEKOBT_API_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJ1c3IiOiIxMzAyMjgwOTAyMjk5OSIsInZlciI6MiwidHlwIjoxLCJpYXQiOjE3ODY2MTQ3NjcsImV4cCI6MTgxODE1MDc2N30.bsc6muXf09xdrPKsIROmafUNFEFKlf06S8UZC547_Dw"
+
 class Provider {
     constructor() {
-        this.baseUrl = "https://nyaa.si"
+        this.baseUrl = "https://nekobt.to"
+        this.apiBaseUrl = this.baseUrl + "/api/v1"
+        this.authenticated = null
     }
 
     getSettings() {
@@ -15,54 +19,128 @@ class Provider {
     }
 
     async search(opts) {
-        const query = this.cleanQuery(opts && opts.query)
+        const query = this.cleanQuery(opts && opts.query) || this.getBestTitle(opts && opts.media)
         if (!query) return []
 
-        return this.searchTorrents(query)
+        return this.searchTorrents({
+            query: query,
+            limit: 100,
+            sort_by: "best",
+        }, {
+            confirmed: false,
+            episodesById: {},
+        })
     }
 
-
-  
     async smartSearch(opts) {
-        let query = this.cleanQuery(opts && opts.query)
-
-        if (!query) {
-            query = this.getBestTitle(opts && opts.media)
-        }
-
+        const media = opts && opts.media
+        const manualQuery = this.cleanQuery(opts && opts.query)
+        const titleQuery = this.getBestTitle(media)
+        const query = manualQuery || titleQuery
         if (!query) return []
 
-        if (opts && opts.batch) {
-            query += " batch"
-        } else if (opts && opts.episodeNumber > 0) {
-            query += " " + String(opts.episodeNumber).padStart(2, "0")
+        const requestedEpisode = this.toPositiveInteger(opts && opts.episodeNumber, -1)
+        const requestedResolution = this.normalizeResolution(opts && opts.resolution)
+        const wantsBatch = Boolean(opts && opts.batch)
+
+        const mediaMatch = await this.resolveMedia(media, titleQuery || query)
+        const mediaDetails = mediaMatch
+            ? await this.apiGet("/media/" + encodeURIComponent(String(mediaMatch.id)))
+            : null
+        const episodes = mediaDetails && Array.isArray(mediaDetails.episodes)
+            ? mediaDetails.episodes
+            : []
+        const selectedEpisode = requestedEpisode > 0
+            ? this.findEpisode(episodes, requestedEpisode, media && media.absoluteSeasonOffset)
+            : null
+        const episodesById = this.indexEpisodes(episodes)
+
+        const params = {
+            limit: 100,
+            sort_by: "seeders",
         }
 
-        if (opts && opts.resolution) {
-            query += " " + String(opts.resolution).replace(/p$/i, "")
+        if (mediaMatch) {
+            params.media_id = String(mediaMatch.id)
+        } else {
+            params.query = this.buildSmartQuery(query, opts)
         }
 
-        let torrents = await this.searchTorrents(query)
-
-        if (opts && opts.batch) {
-            torrents = torrents.filter(torrent => torrent && torrent.isBatch)
-        } else if (opts && opts.episodeNumber > 0) {
-            torrents = torrents.filter(torrent => torrent && torrent.episodeNumber === opts.episodeNumber)
+        if (wantsBatch) {
+            params.batch = true
+        } else if (requestedEpisode > 0) {
+            params.batch = false
         }
 
-        if (opts && opts.resolution) {
-            const wantedResolution = String(opts.resolution).toLowerCase().replace(/p?$/i, "p")
-            const resolutionMatches = torrents.filter(torrent => {
-                const resolution = String((torrent && torrent.resolution) || "").toLowerCase()
-                return !resolution || resolution === wantedResolution
-            })
+        if (selectedEpisode) {
+            params.episode_ids = String(selectedEpisode.id)
+        }
 
-            if (resolutionMatches.length > 0) {
-                torrents = resolutionMatches
+        const context = {
+            confirmed: Boolean(mediaMatch),
+            mediaId: mediaMatch ? String(mediaMatch.id) : "",
+            selectedEpisodeId: selectedEpisode ? String(selectedEpisode.id) : "",
+            episodeFilterApplied: Boolean(selectedEpisode),
+            structuredEpisodeResolved: Boolean(selectedEpisode),
+            requestedSeason: selectedEpisode
+                ? this.toPositiveInteger(selectedEpisode.season, 0)
+                : 0,
+            requestedEpisode: requestedEpisode,
+            requestedAbsoluteEpisode: this.getAbsoluteEpisode(requestedEpisode, media && media.absoluteSeasonOffset),
+            requestedResolution: requestedResolution,
+            episodesById: episodesById,
+        }
+
+        let torrents = await this.searchTorrents(params, context)
+
+        if (selectedEpisode && torrents.length === 0) {
+            // Some NekoBT torrents belong to the correct media but have no
+            // media_episode_ids. Fall back once and let local parsing decide.
+            delete params.episode_ids
+            context.selectedEpisodeId = ""
+            context.episodeFilterApplied = false
+            context.confirmed = false
+            torrents = await this.searchTorrents(params, context)
+        }
+
+        if (wantsBatch) {
+            torrents = torrents.filter(torrent => torrent && torrent.isBatch === true)
+        } else if (requestedEpisode > 0) {
+            const singleTorrents = torrents.filter(torrent => torrent && torrent.isBatch !== true)
+
+            if (context.episodeFilterApplied) {
+                // NekoBT already restricted the response using the structured episode ID.
+                // Prefer single releases, but keep structured multi-episode results as fallback.
+                if (singleTorrents.length > 0) torrents = singleTorrents
+            } else {
+                const matchingEpisodes = singleTorrents.filter(torrent => {
+                    if (context.requestedSeason > 0) {
+                        return torrent.episodeNumber === context.requestedAbsoluteEpisode
+                    }
+
+                    return torrent.episodeNumber === requestedEpisode ||
+                        torrent.episodeNumber === context.requestedAbsoluteEpisode
+                })
+                const unknownEpisodes = singleTorrents.filter(torrent => torrent.episodeNumber < 1)
+
+                torrents = matchingEpisodes.length > 0
+                    ? matchingEpisodes
+                    : context.structuredEpisodeResolved
+                        ? []
+                        : unknownEpisodes
             }
         }
 
-        return torrents
+        if (requestedResolution) {
+            const matching = torrents.filter(torrent => torrent && torrent.resolution === requestedResolution)
+            const unknown = torrents.filter(torrent => torrent && !torrent.resolution)
+
+            if (matching.length > 0) {
+                torrents = matching.concat(unknown)
+            }
+        }
+
+        return this.sortTorrents(torrents, context)
     }
 
     async getTorrentInfoHash(torrent) {
@@ -77,257 +155,358 @@ class Provider {
         return []
     }
 
-    async searchTorrents(query) {
-        const cleaned = this.cleanQuery(query)
-        if (!cleaned) return []
+    async searchTorrents(params, context) {
+        const data = await this.apiGet("/torrents/search", params)
+        const items = data && Array.isArray(data.results) ? data.results : []
+        const torrents = []
 
-        const isProbe = cleaned.toLowerCase() === "nyaa probe"
-        const searchQuery = isProbe ? "One Piece" : cleaned
-        const url = this.baseUrl + "/?f=0&c=0_0&q=" + encodeURIComponent(searchQuery) + "&s=seeders&o=desc"
+        for (let i = 0; i < items.length; i++) {
+            try {
+                const torrent = this.mapNekoTorrent(items[i], context || {})
+                if (torrent && torrent.name && (torrent.magnetLink || torrent.downloadUrl)) {
+                    torrents.push(torrent)
+                }
+            } catch (_) {
+                // Ignore malformed entries without failing the entire search.
+            }
+        }
+
+        return torrents
+    }
+
+    async resolveMedia(media, query) {
+        const searchTitle = this.cleanQuery(query)
+        if (!searchTitle) return null
+
+        const data = await this.apiGet("/media/search", {
+            query: searchTitle,
+            limit: 10,
+        })
+        const results = data && Array.isArray(data.results) ? data.results : []
+        const expectedTitles = this.getMediaTitles(media)
+
+        if (expectedTitles.length === 0) {
+            expectedTitles.push(searchTitle)
+        }
+
+        const expectedYear = this.toPositiveInteger(media && media.startDate && media.startDate.year, 0)
+        const exactMatches = []
+
+        for (let i = 0; i < results.length; i++) {
+            const candidate = results[i]
+            if (!candidate || !candidate.id) continue
+
+            const candidateTitles = [candidate.title].concat(
+                Array.isArray(candidate.alternate_titles) ? candidate.alternate_titles : []
+            )
+
+            if (this.hasExactTitleMatch(expectedTitles, candidateTitles)) {
+                exactMatches.push(candidate)
+            }
+        }
+
+        if (exactMatches.length === 0) return null
+
+        if (expectedYear) {
+            for (let i = 0; i < exactMatches.length; i++) {
+                if (this.toPositiveInteger(exactMatches[i].year, 0) === expectedYear) {
+                    return exactMatches[i]
+                }
+            }
+        }
+
+        // NekoBT can aggregate multiple seasons under the first season's year.
+        return exactMatches[0]
+    }
+
+    async apiGet(path, params) {
+        if (!await this.ensureAuthenticated()) return null
+
+        const query = []
+        const values = params || {}
+        const keys = Object.keys(values)
+
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i]
+            const value = values[key]
+            if (value === undefined || value === null || value === "") continue
+
+            query.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(value)))
+        }
+
+        const url = this.apiBaseUrl + path + (query.length ? "?" + query.join("&") : "")
 
         try {
-            const response = await fetch(url)
-            if (!response.ok) return []
+            const response = await fetch(url, {
+                headers: {
+                    Accept: "application/json",
+                    Cookie: "ssid=" + NEKOBT_API_KEY,
+                },
+                timeout: 30,
+            })
 
-            const html = response.text()
-            const $ = LoadDoc(html)
-            const rows = $("tbody tr")
+            if (!response.ok) return null
 
-            if (isProbe) {
-                const firstRow = rows.first()
-                const titleLink = firstRow.find('td[colspan="2"] a').first()
-                const magnetLink = firstRow.find('a[href^="magnet:"]').first()
-                const cells = firstRow.children("td")
+            const payload = await response.json()
+            if (!payload || payload.error || !payload.data) return null
 
-                const title = titleLink.text().trim()
-                const pagePath = titleLink.attr("href") || ""
-                const magnet = (magnetLink.attr("href") || "").replace(/&amp;/g, "&")
-                const size = cells.eq(3).text().trim()
-                const date = cells.eq(4).text().trim()
-                const seeders = cells.eq(5).text().trim()
-                const leechers = cells.eq(6).text().trim()
+            return payload.data
+        } catch (_) {
+            return null
+        }
+    }
 
-                return [{
-                    name: "NYAA PROBE | rows=" + rows.length() + " | title=" + title + " | page=" + pagePath + " | magnet=" + (magnet ? "yes" : "no") + " | size=" + size + " | date=" + date + " | seeders=" + seeders + " | leechers=" + leechers,
-                    date: new Date(0).toISOString(),
-                    size: this.parseSize(size),
-                    formattedSize: size,
-                    seeders: this.toNumber(seeders),
-                    leechers: this.toNumber(leechers),
-                    downloadCount: 0,
-                    link: pagePath ? this.baseUrl + pagePath.replace(/#comments$/i, "") : url,
-                    downloadUrl: "",
-                    magnetLink: magnet,
-                    infoHash: this.parseInfoHash(magnet),
-                    resolution: "1080p",
-                    isBatch: false,
-                    episodeNumber: 1,
-                    releaseGroup: "NYAA-PROBE",
-                    isBestRelease: false,
-                    confirmed: true,
-                }]
+    async ensureAuthenticated() {
+        if (this.authenticated !== null) return this.authenticated
+
+        if (!NEKOBT_API_KEY || NEKOBT_API_KEY === "COLOQUE_A_CHAVE_AQUI") {
+            this.authenticated = false
+            return false
+        }
+
+        try {
+            const response = await fetch(this.apiBaseUrl + "/users/@me", {
+                headers: {
+                    Accept: "application/json",
+                    Cookie: "ssid=" + NEKOBT_API_KEY,
+                },
+                timeout: 30,
+            })
+
+            if (!response.ok) {
+                this.authenticated = false
+                return false
             }
 
-            return rows.map((index, row) => {
-                const titleLink = row.find('td[colspan="2"] a').first()
-                const magnetLink = row.find('a[href^="magnet:"]').first()
-                const cells = row.children("td")
-
-                const name = titleLink.text().trim()
-                const pagePath = titleLink.attr("href") || ""
-                const magnet = (magnetLink.attr("href") || "").replace(/&amp;/g, "&")
-                const formattedSize = cells.eq(3).text().trim()
-
-                return {
-                    name: name,
-                    date: this.toRFC3339(cells.eq(4).text().trim()),
-                    size: this.parseSize(formattedSize),
-                    formattedSize: formattedSize,
-                    seeders: this.toNumber(cells.eq(5).text().trim()),
-                    leechers: this.toNumber(cells.eq(6).text().trim()),
-                    downloadCount: this.toNumber(cells.eq(7).text().trim()),
-                    link: pagePath ? this.baseUrl + pagePath.replace(/#comments$/i, "") : magnet,
-                    downloadUrl: "",
-                    magnetLink: magnet,
-                    infoHash: this.parseInfoHash(magnet),
-                    resolution: this.parseResolution(name),
-                    isBatch: this.isBatch(name),
-                    episodeNumber: this.parseEpisode(name),
-                    releaseGroup: this.parseReleaseGroup(name),
-                    isBestRelease: false,
-                    confirmed: false,
-                }
-            }).filter(torrent => torrent.name && (torrent.magnetLink || torrent.link))
+            const payload = await response.json()
+            this.authenticated = Boolean(payload && !payload.error && payload.data && payload.data.id)
+            return this.authenticated
         } catch (_) {
-            return []
+            this.authenticated = false
+            return false
         }
     }
-    async runHtmlProbe() {
-        const url = "https://example.com/"
 
-        const response = await fetch(url, {
-            headers: {
-                "User-Agent": "Seanime Nyaa Torrent Provider HTML Probe",
-            },
-            timeout: 20,
-        })
+    mapNekoTorrent(item, context) {
+        if (!item || !item.id) return null
 
-        if (!response.ok) {
-            return [{
-                name: "HTML probe failed: HTTP " + response.status,
-                date: new Date(0).toISOString(),
-                size: 0,
-                formattedSize: "",
-                seeders: 0,
-                leechers: 0,
-                downloadCount: 0,
-                link: url,
-                downloadUrl: "",
-                magnetLink: "",
-                infoHash: "",
-                resolution: "",
-                isBatch: false,
-                episodeNumber: -1,
-                releaseGroup: "",
-                isBestRelease: false,
-                confirmed: false,
-            }]
-        }
-
-        const html = response.text()
-        const $ = LoadDoc(html)
-
-        const heading = $("h1").first().text().trim()
-
-        const firstLink = $("a").first()
-        const firstLinkText = firstLink.text().trim()
-        const firstLinkHref = firstLink.attr("href") || ""
-
-        const paragraphCount = $("p").length()
-
-        return [{
-            name:
-                "HTML probe OK | h1=" +
-                heading +
-                " | a=" +
-                firstLinkText +
-                " | href=" +
-                firstLinkHref +
-                " | p=" +
-                paragraphCount,
-
-            date: new Date(0).toISOString(),
-            size: html.length,
-            formattedSize: String(html.length) + " chars",
-
-            seeders: response.status,
-            leechers: paragraphCount,
-            downloadCount: 0,
-
-            link: url,
-            downloadUrl: "",
-            magnetLink: "",
-            infoHash: "",
-
-            resolution: "1080p",
-            isBatch: false,
-            episodeNumber: 1,
-            releaseGroup: "HTML-PROBE",
-
-            isBestRelease: false,
-            confirmed: true,
-        }]
-    }
-
-    toAnimeTorrent(item) {
-        const name = String((item && item.Name) || "")
-        const magnet = String((item && item.Magnet) || "")
+        const id = String(item.id)
+        const name = String(item.title || "").trim()
+        const magnet = String(item.private_magnet || item.magnet || "")
+        const infoHash = String(item.infohash || this.parseInfoHash(magnet))
+        const episodeIds = Array.isArray(item.media_episode_ids)
+            ? item.media_episode_ids.map(value => String(value))
+            : []
+        const structuredEpisode = this.getStructuredEpisode(episodeIds, context && context.episodesById)
+        const isBatch = item.batch === true || episodeIds.length > 1
+        const mediaMatches = !context.mediaId || String(item.media_id || "") === context.mediaId
+        const episodeMatches = !context.selectedEpisodeId ||
+            episodeIds.indexOf(context.selectedEpisodeId) !== -1 ||
+            context.episodeFilterApplied === true
+        const parsedEpisode = this.parseEpisode(name)
+        const parsedSeason = this.parseSeason(name)
+        const seasonEpisodeMatches = context.requestedSeason > 0 &&
+            parsedSeason === context.requestedSeason &&
+            parsedEpisode === context.requestedEpisode
+        const episodeNumber = structuredEpisode > 0
+            ? structuredEpisode
+            : episodeMatches && context.episodeFilterApplied
+                ? context.requestedAbsoluteEpisode
+                : seasonEpisodeMatches
+                    ? context.requestedAbsoluteEpisode
+                    : parsedEpisode
 
         return {
             name: name,
-            date: this.toRFC3339(item && item.DateUploaded),
-
-            size: this.parseSize(item && item.Size),
-            formattedSize: item && item.Size
-                ? String(item.Size)
-                : "",
-
-            seeders: this.toNumber(item && item.Seeders),
-            leechers: this.toNumber(item && item.Leechers),
-            downloadCount: this.toNumber(item && item.Downloads),
-
-            link: magnet,
-            downloadUrl: "",
+            date: this.toRFC3339Milliseconds(item.uploaded_at),
+            size: this.toNonNegativeInteger(item.filesize),
+            formattedSize: "",
+            seeders: this.toNonNegativeInteger(item.seeders),
+            leechers: this.toNonNegativeInteger(item.leechers),
+            downloadCount: this.toNonNegativeInteger(item.completed),
+            link: this.baseUrl + "/torrents/" + encodeURIComponent(id),
+            downloadUrl: this.apiBaseUrl + "/torrents/" + encodeURIComponent(id) + "/download?public=true",
             magnetLink: magnet,
-            infoHash: this.parseInfoHash(magnet),
-
+            infoHash: infoHash,
             resolution: this.parseResolution(name),
-            isBatch: this.isBatch(name),
-            episodeNumber: this.parseEpisode(name),
-            releaseGroup: this.parseReleaseGroup(name),
-
+            isBatch: isBatch,
+            episodeNumber: episodeNumber > 0 ? episodeNumber : -1,
+            releaseGroup: this.getReleaseGroup(item, name),
             isBestRelease: false,
-            confirmed: false,
+            confirmed: Boolean(context.confirmed && mediaMatches && episodeMatches),
         }
+    }
+
+    buildSmartQuery(query, opts) {
+        let value = this.cleanQuery(query)
+
+        if (opts && opts.batch) {
+            value += " batch"
+        } else if (opts && opts.episodeNumber > 0) {
+            value += " " + String(opts.episodeNumber)
+        }
+
+        const resolution = this.normalizeResolution(opts && opts.resolution)
+        if (resolution) value += " " + resolution
+
+        return value.trim()
     }
 
     getBestTitle(media) {
         if (!media) return ""
 
         return this.cleanQuery(
-            media.englishTitle ||
             media.romajiTitle ||
-            (Array.isArray(media.synonyms)
-                ? media.synonyms[0]
-                : "") ||
+            media.englishTitle ||
+            (Array.isArray(media.synonyms) ? media.synonyms[0] : "") ||
             ""
         )
     }
 
-    cleanQuery(value) {
+    getMediaTitles(media) {
+        if (!media) return []
+
+        const values = [media.romajiTitle, media.englishTitle].concat(
+            Array.isArray(media.synonyms) ? media.synonyms : []
+        )
+        const titles = []
+
+        for (let i = 0; i < values.length; i++) {
+            const title = String(values[i] || "").trim()
+            if (title && titles.indexOf(title) === -1) titles.push(title)
+        }
+
+        return titles
+    }
+
+    hasExactTitleMatch(expectedTitles, candidateTitles) {
+        for (let i = 0; i < expectedTitles.length; i++) {
+            const expected = this.normalizeTitle(expectedTitles[i])
+            if (!expected) continue
+
+            for (let j = 0; j < candidateTitles.length; j++) {
+                if (expected === this.normalizeTitle(candidateTitles[j])) return true
+            }
+        }
+
+        return false
+    }
+
+    normalizeTitle(value) {
         return String(value || "")
-            .replace(/[^\w\s-]/g, " ")
+            .toLowerCase()
+            .replace(/[\s._-]+/g, " ")
+            .replace(/[()[\]{}:!?,"']/g, " ")
             .replace(/\s+/g, " ")
             .trim()
     }
 
-    parseInfoHash(magnet) {
-        const match = String(magnet || "")
-            .match(/btih:([A-Fa-f0-9]{32,40})/i)
-
-        return match ? match[1] : ""
+    cleanQuery(value) {
+        return String(value || "")
+            .replace(/[\r\n\t]+/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
     }
 
-    parseSize(value) {
-        if (!value) return 0
+    findEpisode(episodes, requestedEpisode, absoluteSeasonOffset) {
+        const absoluteEpisode = this.getAbsoluteEpisode(requestedEpisode, absoluteSeasonOffset)
+        const absoluteMatches = episodes.filter(episode =>
+            this.toPositiveInteger(episode && episode.absolute, -1) === absoluteEpisode
+        )
 
-        const match = String(value)
-            .trim()
-            .match(/^([\d.]+)\s*([KMGT]?i?B|[KMGT]B)?$/i)
-
-        if (!match) return 0
-
-        const amount = Number(match[1])
-        const unit = (match[2] || "B").toUpperCase()
-
-        if (!Number.isFinite(amount)) return 0
-
-        const multipliers = {
-            B: 1,
-            KB: 1000,
-            MB: 1000 ** 2,
-            GB: 1000 ** 3,
-            TB: 1000 ** 4,
-
-            KIB: 1024,
-            MIB: 1024 ** 2,
-            GIB: 1024 ** 3,
-            TIB: 1024 ** 4,
+        if (absoluteMatches.length === 1 && absoluteMatches[0].id !== undefined) {
+            return absoluteMatches[0]
         }
 
-        return Math.round(
-            amount * (multipliers[unit] || 1)
+        const localMatches = episodes.filter(episode =>
+            this.toPositiveInteger(episode && episode.episode, -1) === requestedEpisode
         )
+
+        if (localMatches.length === 1 && localMatches[0].id !== undefined) {
+            return localMatches[0]
+        }
+
+        return null
+    }
+
+    getAbsoluteEpisode(episodeNumber, absoluteSeasonOffset) {
+        const episode = this.toPositiveInteger(episodeNumber, -1)
+        if (episode < 1) return -1
+
+        const offset = this.toPositiveInteger(absoluteSeasonOffset, 0)
+        return episode + offset
+    }
+
+    indexEpisodes(episodes) {
+        const indexed = {}
+
+        for (let i = 0; i < episodes.length; i++) {
+            const episode = episodes[i]
+            if (episode && episode.id !== undefined) {
+                indexed[String(episode.id)] = episode
+            }
+        }
+
+        return indexed
+    }
+
+    getStructuredEpisode(episodeIds, episodesById) {
+        if (episodeIds.length !== 1 || !episodesById) return -1
+
+        const episode = episodesById[episodeIds[0]]
+        if (!episode) return -1
+
+        const absolute = this.toPositiveInteger(episode.absolute, -1)
+        if (absolute > 0) return absolute
+
+        return this.toPositiveInteger(episode.episode, -1)
+    }
+
+    getReleaseGroup(item, name) {
+        const groups = Array.isArray(item && item.groups) ? item.groups : []
+
+        for (let i = 0; i < groups.length; i++) {
+            const group = groups[i]
+            if (group && group.uploading_group) {
+                return String(group.display_name || group.name || "")
+            }
+        }
+
+        return this.parseReleaseGroup(name)
+    }
+
+    sortTorrents(torrents, context) {
+        const requestedResolution = context.requestedResolution || ""
+        const requestedEpisode = context.requestedEpisode || -1
+        const requestedAbsolute = context.requestedAbsoluteEpisode || -1
+
+        return torrents.sort((a, b) => {
+            const confirmedDifference = Number(Boolean(b.confirmed)) - Number(Boolean(a.confirmed))
+            if (confirmedDifference) return confirmedDifference
+
+            const aEpisodeMatch = a.episodeNumber === requestedEpisode || a.episodeNumber === requestedAbsolute
+            const bEpisodeMatch = b.episodeNumber === requestedEpisode || b.episodeNumber === requestedAbsolute
+            const episodeDifference = Number(bEpisodeMatch) - Number(aEpisodeMatch)
+            if (episodeDifference) return episodeDifference
+
+            const resolutionDifference = Number(b.resolution === requestedResolution) - Number(a.resolution === requestedResolution)
+            if (resolutionDifference) return resolutionDifference
+
+            const seederDifference = b.seeders - a.seeders
+            if (seederDifference) return seederDifference
+
+            return new Date(b.date).getTime() - new Date(a.date).getTime()
+        })
+    }
+
+    normalizeResolution(value) {
+        const match = String(value || "").match(/(2160|1440|1080|720|576|540|480)p?/i)
+        return match ? match[1] + "p" : ""
+    }
+
+    parseInfoHash(magnet) {
+        const match = String(magnet || "").match(/btih:([A-Fa-f0-9]{32,40})/i)
+        return match ? match[1] : ""
     }
 
     parseResolution(name) {
@@ -345,92 +524,54 @@ class Provider {
             return -1
         }
 
-        if (/(?:^|[\s[\]()._-])S\d{1,2}\s*-\s*S\d{1,2}(?:$|[\s[\]()._-])/i.test(text)) {
-            return -1
-        }
-
         const seasonEpisode = text.match(
             /(?:^|[\s[\]()._-])S\d{1,2}[\s._-]?E(\d{1,4})(?:$|[\s[\]()._-])/i
         )
-
         if (seasonEpisode) return Number(seasonEpisode[1])
 
         const explicit = text.match(
             /(?:^|[\s[\]()._-])(?:E|EP|Episode)[\s._-]?(\d{1,4})(?:$|[\s[\]()._-])/i
         )
-
         if (explicit) return Number(explicit[1])
 
-        const bracketed = text.match(
-            /\[(\d{1,4})]/
-        )
-
-        if (bracketed) return Number(bracketed[1])
-
-        const dashed = text.match(
-            /\s-\s(\d{1,4})(?:\s|$|[\[\]()._-])/
-        )
-
+        const dashed = text.match(/\s-\s(\d{1,4})(?:\s|$|[\[\]()._-])/)
         if (dashed) return Number(dashed[1])
-
-        const candidates = []
-        const standalonePattern = /(?:^|[\s[\]()._-])(\d{1,4})(?:$|[\s[\]()._-])/g
-        let match
-
-        while ((match = standalonePattern.exec(text)) !== null) {
-            candidates.push(Number(match[1]))
-
-            if (match[0].length === 0) {
-                standalonePattern.lastIndex += 1
-            }
-        }
-
-        for (let i = candidates.length - 1; i >= 0; i--) {
-            const episode = candidates[i]
-
-            if (episode === 480 || episode === 540 || episode === 576 || episode === 720 || episode === 1080 || episode === 1440 || episode === 2160) {
-                continue
-            }
-
-            return episode
-        }
 
         return -1
     }
 
-    parseReleaseGroup(name) {
+    parseSeason(name) {
         const match = String(name || "").match(
-            /^\[([^\]]+)]/
+            /(?:^|[\s[\]()._-])S(\d{1,2})[\s._-]?E\d{1,4}(?:$|[\s[\]()._-])/i
         )
 
+        return match ? Number(match[1]) : -1
+    }
+
+    parseReleaseGroup(name) {
+        const match = String(name || "").match(/^\[([^\]]+)]/)
         return match ? match[1] : ""
     }
 
-    isBatch(name) {
-        const text = String(name || "")
-
-        if (/(?:^|[\s[\]()._-])(?:batch|complete|season)(?:$|[\s[\]()._-])/i.test(text)) {
-            return true
-        }
-
-        return /(?:^|[\s[\]()._-])s\d{1,2}(?![\s._-]*e\d)(?:$|[\s[\]()._-])/i.test(text)
+    toNonNegativeInteger(value) {
+        const number = Number(value)
+        if (!Number.isFinite(number) || number < 0) return 0
+        return Math.floor(number)
     }
 
-    toNumber(value) {
-        const number = Number(value || 0)
-
-        return Number.isFinite(number)
-            ? number
-            : 0
+    toPositiveInteger(value, fallback) {
+        const number = Number(value)
+        if (!Number.isFinite(number) || number < 1) return fallback
+        return Math.floor(number)
     }
 
-    toRFC3339(value) {
-        const date = new Date(value || 0)
-
-        if (Number.isNaN(date.getTime())) {
+    toRFC3339Milliseconds(value) {
+        const milliseconds = Number(value)
+        if (!Number.isFinite(milliseconds) || milliseconds < 0) {
             return new Date(0).toISOString()
         }
 
-        return date.toISOString()
+        const date = new Date(milliseconds)
+        return Number.isNaN(date.getTime()) ? new Date(0).toISOString() : date.toISOString()
     }
 }
