@@ -8,7 +8,7 @@
   "type": "anime-torrent-provider",
   "language": "javascript",
   "lang": "en",
-  "icon": "https://raw.githubusercontent.com/HariHertz/seanime-nekobridge/refs/heads/main/assets/nekobridge.png",
+  "icon": "https://raw.githubusercontent.com/HariHertz/seanime-nekobridge/refs/heads/main/assets/icon.png",
   "userConfig": {
     "version": 2,
     "requiresConfig": true,
