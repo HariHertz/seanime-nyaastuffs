@@ -2,7 +2,7 @@
   "id": "nekobridge",
   "name": "NekoBridge",
   "description": "A bridge between NekoBT and Seanime!",
-  "manifestURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/manifest.json",
+  "manifestURI": "https://raw.githubusercontent.com/HariHertz/seanime-nekobridge/refs/heads/main/manifest.json",
   "version": "1.0.5",
   "author": "Haris Hertz",
   "type": "anime-torrent-provider",
@@ -43,5 +43,5 @@
       }
     ]
   },
-  "payloadURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/provider.js"
+  "payloadURI": "https://raw.githubusercontent.com/HariHertz/seanime-nekobridge/refs/heads/main/provider.js"
 }
