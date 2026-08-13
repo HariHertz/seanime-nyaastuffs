@@ -1,7 +1,5 @@
 /// <reference path="./anime-torrent-provider.d.ts" />
 
-const NEKOBT_API_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJ1c3IiOiIxMzAyMjgwOTAyMjk5OSIsInZlciI6MiwidHlwIjoxLCJpYXQiOjE3ODY2MTQ3NjcsImV4cCI6MTgxODE1MDc2N30.bsc6muXf09xdrPKsIROmafUNFEFKlf06S8UZC547_Dw"
-
 const RELEASE_PREFERENCES = {
     preferPtBrSubtitles: true,
     avoidMachineTranslatedSubtitles: true,
@@ -48,6 +46,7 @@ class Provider {
         this.baseUrl = "https://nekobt.to"
         this.apiBaseUrl = this.baseUrl + "/api/v1"
         this.authenticated = null
+        this.authenticatedKey = ""
     }
 
     getSettings() {
@@ -258,7 +257,8 @@ class Provider {
     }
 
     async apiGet(path, params) {
-        if (!await this.ensureAuthenticated()) return null
+        const apiKey = this.getApiKey()
+        if (!await this.ensureAuthenticated(apiKey)) return null
 
         const query = []
         const values = params || {}
@@ -278,7 +278,7 @@ class Provider {
             const response = await fetch(url, {
                 headers: {
                     Accept: "application/json",
-                    Cookie: "ssid=" + NEKOBT_API_KEY,
+                    Cookie: "ssid=" + apiKey,
                 },
                 timeout: 30,
             })
@@ -294,19 +294,32 @@ class Provider {
         }
     }
 
-    async ensureAuthenticated() {
-        if (this.authenticated !== null) return this.authenticated
+    getApiKey() {
+        return String($getUserPreference("nekobtApiKey") || "").trim()
+    }
 
-        if (!NEKOBT_API_KEY || NEKOBT_API_KEY === "COLOQUE_A_CHAVE_AQUI") {
+    async ensureAuthenticated(apiKey) {
+        const currentKey = apiKey === undefined
+            ? this.getApiKey()
+            : String(apiKey || "").trim()
+
+        if (this.authenticatedKey !== currentKey) {
+            this.authenticatedKey = currentKey
+            this.authenticated = null
+        }
+
+        if (!currentKey) {
             this.authenticated = false
             return false
         }
+
+        if (this.authenticated !== null) return this.authenticated
 
         try {
             const response = await fetch(this.apiBaseUrl + "/users/@me", {
                 headers: {
                     Accept: "application/json",
-                    Cookie: "ssid=" + NEKOBT_API_KEY,
+                    Cookie: "ssid=" + currentKey,
                 },
                 timeout: 30,
             })

@@ -1,12 +1,24 @@
 {
-  "id": "nyaa-torrent-provider",
-  "name": "Nyaa Torrent Provider",
-  "description": "Nyaa torrent provider for Seanime",
+  "id": "nekobt-torrent-multiprovider",
+  "name": "NekoBT Provider Ultra 3000",
+  "description": "NekoBT torrent provider for Seanime!",
   "manifestURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/manifest.json",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "author": "Ner0",
   "type": "anime-torrent-provider",
   "language": "javascript",
   "lang": "en",
+  "userConfig": {
+    "version": 1,
+    "requiresConfig": true,
+    "fields": [
+      {
+        "type": "text",
+        "name": "nekobtApiKey",
+        "label": "NekoBT API Key (SSID used for API authentication)",
+        "default": ""
+      }
+    ]
+  },
   "payloadURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/provider.js"
 }
