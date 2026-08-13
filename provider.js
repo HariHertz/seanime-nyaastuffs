@@ -1,13 +1,48 @@
 /// <reference path="./anime-torrent-provider.d.ts" />
 
 const RELEASE_PREFERENCES = {
-    preferPtBrSubtitles: true,
     avoidMachineTranslatedSubtitles: true,
     preferSoftsubs: true,
     preferredVideoCodecs: [],
     preferredVideoTypes: [],
     preferRequestedResolution: true,
     preferMoreSeeders: true,
+}
+
+const RELEASE_SCORE_WEIGHTS = {
+    preferredSubtitleLanguage: 5000,
+    multiSub: 700,
+}
+
+const PREFERRED_SUBTITLE_LANGUAGE_CODES = {
+    "pt-br": true,
+    "pt-pt": true,
+    en: true,
+    "es-es": true,
+    "es-419": true,
+    de: true,
+    "fr-fr": true,
+    it: true,
+    ja: true,
+}
+
+const SUBTITLE_LANGUAGE_ALIASES = {
+    cmn: "zh",
+    eng: "en",
+    "en-jp": "enm",
+    es: "es-es",
+    fr: "fr-fr",
+    jp: "ja",
+    nb: "no",
+    nn: "no",
+    pt: "pt-pt",
+    "spa-419": "es-419",
+    tg: "fil",
+    ptbr: "pt-br",
+    ptpt: "pt-pt",
+    eses: "es-es",
+    es419: "es-419",
+    frfr: "fr-fr",
 }
 
 const VIDEO_CODEC_NAMES = {
@@ -68,6 +103,7 @@ class Provider {
             requestedAbsoluteEpisode: -1,
             requestedResolution: "",
             episodesById: {},
+            releasePreferences: this.getReleasePreferences(),
         }
         const torrents = await this.searchTorrents({
             query: query,
@@ -135,6 +171,7 @@ class Provider {
             requestedAbsoluteEpisode: this.getAbsoluteEpisode(requestedEpisode, media && media.absoluteSeasonOffset),
             requestedResolution: requestedResolution,
             episodesById: episodesById,
+            releasePreferences: this.getReleasePreferences(),
         }
 
         let torrents = await this.searchTorrents(params, context)
@@ -550,6 +587,7 @@ class Provider {
 
     getReleaseScore(torrent, context) {
         const metadata = torrent && torrent._neko ? torrent._neko : {}
+        const userPreferences = context.releasePreferences || this.getReleasePreferences()
         const requestedEpisode = context.requestedEpisode || -1
         const requestedAbsolute = context.requestedAbsoluteEpisode || -1
         const requestedResolution = context.requestedResolution || ""
@@ -573,10 +611,14 @@ class Provider {
         }
 
         if (
-            RELEASE_PREFERENCES.preferPtBrSubtitles &&
-            this.hasPreferredSubtitleLanguage(metadata)
+            userPreferences.preferredSubtitleLanguage &&
+            this.hasSubtitleLanguage(metadata, userPreferences.preferredSubtitleLanguage)
         ) {
-            score += 5000
+            score += RELEASE_SCORE_WEIGHTS.preferredSubtitleLanguage
+        }
+
+        if (userPreferences.preferMultiSub && this.isMultiSub(metadata)) {
+            score += RELEASE_SCORE_WEIGHTS.multiSub
         }
 
         if (RELEASE_PREFERENCES.avoidMachineTranslatedSubtitles && metadata.mtl === true) {
@@ -618,27 +660,82 @@ class Provider {
         return 0
     }
 
-    hasPreferredSubtitleLanguage(metadata) {
+    getReleasePreferences() {
+        const preferredLanguage = this.normalizeSubtitleLanguage(
+            $getUserPreference("preferredSubtitleLanguage")
+        )
+
+        return {
+            preferredSubtitleLanguage: PREFERRED_SUBTITLE_LANGUAGE_CODES[preferredLanguage]
+                ? preferredLanguage
+                : "",
+            preferMultiSub: this.getBooleanUserPreference("preferMultiSub", true),
+        }
+    }
+
+    getBooleanUserPreference(name, defaultValue) {
+        const value = $getUserPreference(name)
+        if (value === true || value === false) return value
+
+        const normalized = String(value === undefined ? "" : value).trim().toLowerCase()
+        if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") {
+            return true
+        }
+        if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") {
+            return false
+        }
+
+        return defaultValue
+    }
+
+    hasSubtitleLanguage(metadata, preferredLanguage) {
+        const normalizedPreferred = this.normalizeSubtitleLanguage(preferredLanguage)
+        if (!normalizedPreferred) return false
+
+        return this.getSubtitleLanguages(metadata).indexOf(normalizedPreferred) !== -1
+    }
+
+    isMultiSub(metadata) {
+        return this.getSubtitleLanguages(metadata).length >= 2
+    }
+
+    getSubtitleLanguages(metadata) {
         const languages = this.parseLanguageList(metadata && metadata.subLang).concat(
             this.parseLanguageList(metadata && metadata.fanSubLang)
         )
+        const uniqueLanguages = []
 
         for (let i = 0; i < languages.length; i++) {
-            const code = String(languages[i] || "")
-                .toLowerCase()
-                .replace(/[^a-z]/g, "")
-
-            if (code === "ptbr" || code === "portuguesebr" || code === "portuguesebrazil") {
-                return true
+            const normalized = this.normalizeSubtitleLanguage(languages[i])
+            if (normalized && uniqueLanguages.indexOf(normalized) === -1) {
+                uniqueLanguages.push(normalized)
             }
         }
 
-        return false
+        return uniqueLanguages
     }
 
     parseLanguageList(value) {
         const values = Array.isArray(value) ? value : String(value || "").split(",")
         return values.map(language => String(language || "").trim()).filter(Boolean)
+    }
+
+    normalizeSubtitleLanguage(value) {
+        const normalized = String(value || "")
+            .trim()
+            .toLowerCase()
+            .replace(/_/g, "-")
+            .replace(/\s+/g, "")
+
+        if (!normalized) return ""
+        if (SUBTITLE_LANGUAGE_ALIASES[normalized]) {
+            return SUBTITLE_LANGUAGE_ALIASES[normalized]
+        }
+        if (/^[a-z]{2,3}(?:-[a-z0-9]{2,4})?$/.test(normalized)) {
+            return normalized
+        }
+
+        return ""
     }
 
     normalizeVideoCodec(value) {

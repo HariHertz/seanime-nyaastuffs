@@ -3,13 +3,13 @@
   "name": "NekoBT Provider Ultra 3000",
   "description": "NekoBT torrent provider for Seanime!",
   "manifestURI": "https://raw.githubusercontent.com/HariHertz/seanime-nyaastuffs/refs/heads/main/manifest.json",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "Ner0",
   "type": "anime-torrent-provider",
   "language": "javascript",
   "lang": "en",
   "userConfig": {
-    "version": 1,
+    "version": 2,
     "requiresConfig": true,
     "fields": [
       {
@@ -17,6 +17,29 @@
         "name": "nekobtApiKey",
         "label": "NekoBT API Key (SSID used for API authentication)",
         "default": ""
+      },
+      {
+        "type": "select",
+        "name": "preferredSubtitleLanguage",
+        "label": "Preferred Subtitle Language",
+        "options": [
+          { "value": "pt-br", "label": "Portuguese (Brazil)" },
+          { "value": "pt-pt", "label": "Portuguese (Portugal)" },
+          { "value": "en", "label": "English" },
+          { "value": "es-es", "label": "Spanish (Spain)" },
+          { "value": "es-419", "label": "Spanish (Latin American)" },
+          { "value": "de", "label": "German" },
+          { "value": "fr-fr", "label": "French" },
+          { "value": "it", "label": "Italian" },
+          { "value": "ja", "label": "Japanese" }
+        ],
+        "default": "pt-br"
+      },
+      {
+        "type": "switch",
+        "name": "preferMultiSub",
+        "label": "Prefer Multi-Sub releases",
+        "default": "true"
       }
     ]
   },
